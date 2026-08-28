@@ -6,6 +6,7 @@
 <title>Bioma — sandbox de ecosistema</title>
 <meta name="description" content="Un sandbox de ecosistema en 3D: ajustas la lluvia y la población, y observas cómo el sistema se sostiene o se desploma. No controlas ninguna criatura.">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d1210">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Bioma — sandbox de ecosistema">
 <meta property="og:description" content="Ajustas el clima. Siembras vida. El resto ocurre sin ti.">
@@ -24,7 +25,7 @@
   --surface:#0d1210;
   --ink:#eef1ea;
   --ink-muted:#9aa79c;
-  --ink-faint:#5f6b62;
+  --ink-faint:#7f8c82;
   --hairline:rgba(238,241,234,.08);
   --hairline-strong:rgba(238,241,234,.16);
   --accent:#b7ff5c;
@@ -83,7 +84,7 @@ body{
   transition:opacity var(--dur-3) var(--ease-std);
   pointer-events:none;
   padding:6px 10px;border-radius:var(--r-md);
-  background:rgba(13,18,16,.5);
+  background:rgba(13,18,16,.78);
   -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
 }
 #hint.gone{opacity:0}
@@ -92,7 +93,7 @@ body{
   font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--accent-warn);
   padding:6px 10px;border-radius:var(--r-md);
-  background:rgba(13,18,16,.5);border:1px solid var(--warn-quiet);
+  background:rgba(13,18,16,.78);border:1px solid var(--warn-quiet);
   -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
 }
 #halt[hidden]{display:none}
@@ -170,10 +171,9 @@ h2{
 }
 .row + .row{border-top:1px solid var(--hairline)}
 .tick{width:10px;height:10px;border-radius:var(--r-sm)}
-.tick--veg{background:var(--moss)}
+.tick--veg{background:var(--moss);border-radius:0}
 .tick--herb{background:var(--accent)}
 .tick--pred{background:var(--accent-warn);border-radius:50%}
-.tick--veg{border-radius:1px}
 .row .name{font-size:13.5px;font-weight:500;color:var(--ink-muted)}
 .row.dead .name{color:var(--ink-faint)}
 .num{
@@ -507,6 +507,7 @@ const PARAMS = {
   PLANT_RIPE: 0.5,      // mata hecha: la que se ve en pantalla y entra en el censo
   PLANT_DIE: 0.05,      // arrasada: hay que esperar al rebrote
   PLANT_RESEED: 26,     // segundos base de rebrote
+  PLANT_START: 0.30, PLANT_START_SPAN: 0.60,   // pasto en pie al abrir la parcela
 
   /* herbívoros */
   HERB_MAX_E: 130, HERB_START_E: 72,
@@ -821,6 +822,7 @@ function createWorld(seed, P) {
   const px = new Float32Array(N), pz = new Float32Array(N), py = new Float32Array(N);
   const pFert = new Float32Array(N), pGrow = new Float32Array(N);
   const pTimer = new Float32Array(N), pSeed = new Float32Array(N);
+  const pCos = new Float32Array(N), pSin = new Float32Array(N);
   const pType = new Uint8Array(N);     // 0 mata, 1 árbol
   const pDead = new Uint8Array(N);
 
@@ -836,7 +838,9 @@ function createWorld(seed, P) {
     pFert[placed] = f;
     pType[placed] = b === FOREST ? (rnd() < 0.86 ? 1 : 0) : (rnd() < 0.09 ? 1 : 0);
     pSeed[placed] = rnd();
-    pGrow[placed] = 0.35 + rnd() * 0.65;
+    const rot = pSeed[placed] * 6.283;
+    pCos[placed] = Math.cos(rot); pSin[placed] = Math.sin(rot);
+    pGrow[placed] = P.PLANT_START + rnd() * P.PLANT_START_SPAN;
     placed++;
   }
   const plantN = placed;
@@ -895,7 +899,7 @@ function createWorld(seed, P) {
   /* ── estado global ─────────────────────────────────────────────────── */
   const W = {
     seed, terrain, P,
-    plants: { n: plantN, x: px, z: pz, y: py, grow: pGrow, dead: pDead, type: pType, fert: pFert, seed: pSeed },
+    plants: { n: plantN, x: px, z: pz, y: py, grow: pGrow, dead: pDead, type: pType, fert: pFert, seed: pSeed, cos: pCos, sin: pSin },
     herbs, preds,
     t: 0, rain: 0.5,
     veg: 0, biomass: 0,
@@ -904,7 +908,7 @@ function createWorld(seed, P) {
     seedHerb, seedPred,
     reset() {
       herbs.length = 0; preds.length = 0;
-      for (let i = 0; i < plantN; i++) { pGrow[i] = 0.35 + rnd() * 0.65; pDead[i] = 0; pTimer[i] = 0; }
+      for (let i = 0; i < plantN; i++) { pGrow[i] = P.PLANT_START + rnd() * P.PLANT_START_SPAN; pDead[i] = 0; pTimer[i] = 0; }
       W.t = P.DAY_LEN * P.START_PHASE;
       for (const k in W.counters) W.counters[k] = 0;
       seedHerb(P.SEED_HERB); seedPred(P.SEED_PRED);
@@ -976,7 +980,6 @@ function createWorld(seed, P) {
 
     herbGrid.build(herbs);
     predGrid.build(preds);
-
 
     /* ── herbívoros ─────────────────────────────────────────────────── */
     let deadH = 0, deadP = 0;
@@ -1416,8 +1419,8 @@ envTex.needsUpdate = true;
 
 const _e1 = new THREE.Color(), _e2 = new THREE.Color(), _e3 = new THREE.Color();
 function updateEnv(day, dusk, storm) {
-  _e1.setRGB(0.05, 0.10, 0.15).lerp(_e2.setRGB(0.22, 0.40, 0.52), day);   // cenit
-  _e3.setRGB(0.09, 0.12, 0.12).lerp(_e2.setRGB(0.62, 0.66, 0.58), day);   // horizonte
+  _e1.setRGB(0.04, 0.08, 0.12).lerp(_e2.setRGB(0.14, 0.26, 0.34), day);   // cenit
+  _e3.setRGB(0.07, 0.10, 0.11).lerp(_e2.setRGB(0.30, 0.36, 0.33), day);   // horizonte
   _e3.lerp(_e2.setRGB(0.86, 0.44, 0.22), dusk * 0.7);
   if (storm > 0) { _e1.lerp(_e2.setRGB(0.16, 0.19, 0.20), storm); _e3.lerp(_e2.setRGB(0.24, 0.27, 0.28), storm); }
   for (let y = 0; y < ENV_H; y++) {
@@ -1439,7 +1442,7 @@ function updateEnv(day, dusk, storm) {
    separados hacia fuera. Una sola superficie llega hasta el horizonte, de
    modo que el mar nunca enseña un borde ni una costura entre dos láminas. */
 const WRINGS = 80, WSECT = 112, WMAX = 5000, WCURVE = 4;
-let waterMesh = null, waterPos = null, waterNor = null, waterR = null, waterAnim = 0;
+let waterMesh = null, waterPos = null, waterNor = null, waterR = null, waterAnim = 0, waterCol = null;
 
 function buildWater() {
   const A = WMAX / (Math.exp(WCURVE) - 1);
@@ -1448,6 +1451,7 @@ function buildWater() {
 
   const nv = (WRINGS + 1) * WSECT;
   const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3);
+  const col = new Float32Array(nv * 4);
   waterR = new Float32Array(nv);
   for (let i = 0; i <= WRINGS; i++) {
     for (let j = 0; j < WSECT; j++) {
@@ -1455,6 +1459,7 @@ function buildWater() {
       pos[k * 3] = Math.cos(ang) * rings[i];
       pos[k * 3 + 2] = Math.sin(ang) * rings[i];
       nor[k * 3 + 1] = 1;
+      col[k * 4] = col[k * 4 + 1] = col[k * 4 + 2] = 1; col[k * 4 + 3] = 1;
       waterR[k] = rings[i];
     }
   }
@@ -1470,35 +1475,46 @@ function buildWater() {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 4));
   g.setIndex(idx);
   g.computeBoundingSphere();
 
   waterMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
     // mar mate: la vida está en la isla, el agua sólo la enmarca. Un
     // especular alto aquí produce un orbe enorme que se come la escena.
-    color: 0x0c222a, roughness: 0.56, metalness: 0.0,
-    envMap: envTex, envMapIntensity: 0.72,
-    transparent: true, opacity: 0.78,
+    color: 0x061217, roughness: 0.68, metalness: 0.0,
+    envMap: envTex, envMapIntensity: 0.42,
+    transparent: true, vertexColors: true,
   }));
   waterMesh.frustumCulled = false;
-  waterPos = pos; waterNor = nor;
+  waterPos = pos; waterNor = nor; waterCol = col;
   // sólo se anima el agua cercana: más allá el oleaje no se distingue
   waterAnim = nv;
-  for (let i = 0; i <= WRINGS; i++) if (rings[i] > 640) { waterAnim = i * WSECT; break; }
+  for (let i = 0; i <= WRINGS; i++) if (rings[i] > 430) { waterAnim = i * WSECT; break; }
   scene.add(waterMesh);
+}
+
+/* La lámina sólo es translúcida donde hay fondo que enseñar. Mar adentro
+   se vuelve opaca, y así el recorte del lecho no se dibuja nunca. */
+function shadeWater() {
+  for (let k = 0; k < waterCol.length / 4; k++) {
+    const depth = -world.hAt(waterPos[k * 3], waterPos[k * 3 + 2]);
+    waterCol[k * 4 + 3] = lerp(0.70, 1, clamp(depth / 11, 0, 1));
+  }
+  waterMesh.geometry.attributes.color.needsUpdate = true;
 }
 
 function animateWater(t, rain) {
   const amp0 = 0.20 + rain * 0.40;
   for (let k = 0; k < waterAnim; k++) {
     const i = k * 3, x = waterPos[i], z = waterPos[i + 2];
-    const amp = amp0 * clamp((620 - waterR[k]) / 180, 0, 1);
-    const s1 = Math.sin(x * 0.075 + t * 0.75), s2 = Math.sin(z * 0.058 - t * 0.58);
-    const s3 = Math.sin((x + z) * 0.034 + t * 0.32);
-    waterPos[i + 1] = (s1 * 0.5 + s2 * 0.35 + s3 * 0.5) * amp;
+    const amp = amp0 * clamp((400 - waterR[k]) / 140, 0, 1);
+    const a1 = x * 0.075 + z * 0.028 + t * 0.75, a2 = z * 0.058 - x * 0.021 - t * 0.58;
+    waterPos[i + 1] = (Math.sin(a1) * 0.62 + Math.sin(a2) * 0.44) * amp;
     // normales analíticas: más barato y estable que recalcularlas
-    const dx = (Math.cos(x * 0.075 + t * 0.75) * 0.075 * 0.5 + Math.cos((x + z) * 0.034 + t * 0.32) * 0.034 * 0.5) * amp;
-    const dz = (Math.cos(z * 0.058 - t * 0.58) * 0.058 * 0.35 + Math.cos((x + z) * 0.034 + t * 0.32) * 0.034 * 0.5) * amp;
+    const c1 = Math.cos(a1) * amp, c2 = Math.cos(a2) * amp;
+    const dx = c1 * 0.075 * 0.62 - c2 * 0.021 * 0.44;
+    const dz = c1 * 0.028 * 0.62 + c2 * 0.058 * 0.44;
     const l = Math.hypot(-dx, 1, -dz);
     waterNor[i] = -dx / l; waterNor[i + 1] = 1 / l; waterNor[i + 2] = -dz / l;
   }
@@ -1516,12 +1532,12 @@ function buildWeather() {
     const z = (Math.random() * 2 - 1) * HALF * 1.1;
     const y = Math.random() * 92;
     p[i * 6] = x; p[i * 6 + 1] = y; p[i * 6 + 2] = z;
-    p[i * 6 + 3] = x + 0.5; p[i * 6 + 4] = y - 3.4; p[i * 6 + 5] = z;
+    p[i * 6 + 3] = x + 1.5; p[i * 6 + 4] = y - 2.3; p[i * 6 + 5] = z + 0.4;
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(p, 3));
   rainFx = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
-    color: 0x9fc4c6, transparent: true, opacity: 0, depthWrite: false,
+    color: 0x8aabb0, transparent: true, opacity: 0, depthWrite: false,
   }));
   rainFx.frustumCulled = false;
   scene.add(rainFx);
@@ -1542,14 +1558,14 @@ function buildWeather() {
 }
 function animateWeather(dt, rain) {
   const wet = clamp((rain - 0.56) / 0.34, 0, 1);
-  rainFx.material.opacity = wet * 0.34;
+  rainFx.material.opacity = wet * 0.24;
   rainFx.visible = wet > 0.01;
   if (rainFx.visible) {
     const a = rainFx.geometry.attributes.position.array;
     const fall = (46 + wet * 34) * dt;
     for (let i = 0; i < a.length; i += 6) {
       a[i + 1] -= fall; a[i + 4] -= fall;
-      if (a[i + 4] < 0) { const y = 74 + Math.random() * 26; a[i + 1] = y; a[i + 4] = y - 3.4; }
+      if (a[i + 4] < 0) { const y = 74 + Math.random() * 26; a[i + 1] = y; a[i + 4] = y - 2.3; }
     }
     rainFx.geometry.attributes.position.needsUpdate = true;
   }
@@ -1570,8 +1586,8 @@ function animateWeather(dt, rain) {
 const DAY = PARAMS.DAY_LEN;
 const SKY_NIGHT = new THREE.Color('#3a5670'), SKY_DAY = new THREE.Color('#42624e');
 const GRD_NIGHT = new THREE.Color('#141d20'), GRD_DAY = new THREE.Color('#101a12');
-const FOG_NIGHT = new THREE.Color('#111c22'), FOG_DAY = new THREE.Color('#18261f');
-const FOG_DUSK  = new THREE.Color('#2a1d16'), FOG_RAIN = new THREE.Color('#141c1c');
+const FOG_NIGHT = new THREE.Color('#111c22'), FOG_DAY = new THREE.Color('#121d17');
+const FOG_DUSK  = new THREE.Color('#2a1d16'), FOG_RAIN = new THREE.Color('#111818');
 const SUN_DAY = new THREE.Color('#fff4dc'), SUN_DUSK = new THREE.Color('#ff9a58');
 const _fogC = new THREE.Color();
 
@@ -1587,7 +1603,7 @@ function updateSky(t, rain) {
   const dusk = clamp(1 - Math.abs(alt) * 3.2, 0, 1);
   const storm = clamp((rain - 0.5) / 0.5, 0, 1);
 
-  sun.intensity = day * 2.25 * (1 - storm * 0.5);
+  sun.intensity = day * 2.25 * (1 - storm * 0.30);
   sun.color.copy(SUN_DAY).lerp(SUN_DUSK, dusk * 0.9);
   moon.position.set(-Math.cos(az) * 200, Math.max(24, -alt * 170), -Math.sin(az) * 140);
   moon.intensity = (1 - day) * 0.7;
@@ -1603,7 +1619,7 @@ function updateSky(t, rain) {
   // La niebla se calibra sola contra la distancia de cámara: así la
   // atmósfera se lee igual de cerca que de lejos, y el borde del mar
   // muere siempre en la bruma sin velar la parcela.
-  fog.density = (0.52 / Math.max(60, cam.radius)) * (1 + storm * 0.7 + (1 - day) * 0.34);
+  fog.density = (0.52 / Math.max(60, cam.radius)) * (1 + storm * 0.42 + (1 - day) * 0.34);
   updateEnv(day, dusk, storm);
   return day;
 }
@@ -1676,7 +1692,9 @@ const _cc = new THREE.Color();
 
 const _m = new THREE.Matrix4();
 function setInstance(mesh, i, x, y, z, ang, sx, sy, sz) {
-  const c = Math.cos(ang), s = Math.sin(ang);
+  setInstanceCS(mesh, i, x, y, z, Math.cos(ang), Math.sin(ang), sx, sy, sz);
+}
+function setInstanceCS(mesh, i, x, y, z, c, s, sx, sy, sz) {
   _m.set(
     c * sx, 0, -s * sz, x,
     0, sy, 0, y,
@@ -1699,7 +1717,7 @@ function drawPlants() {
     const idx = tree ? b++ : a++;
     const base = tree ? (0.72 + sd * 0.6) : (0.78 + sd * 0.55);
     const s = base * (0.2 + 0.8 * g);
-    setInstance(mesh, idx, pl.x[i], pl.y[i], pl.z[i], sd * 6.283, s, s * (0.85 + g * 0.3), s);
+    setInstanceCS(mesh, idx, pl.x[i], pl.y[i], pl.z[i], pl.cos[i], pl.sin[i], s, s * (0.85 + g * 0.3), s);
     if (tree) _cc.copy(C_TREE_YOUNG).lerp(C_TREE_RIPE, g);
     else _cc.copy(C_TUFT_YOUNG).lerp(C_TUFT_RIPE, g);
     const v = 0.86 + sd * 0.28;
@@ -1746,7 +1764,7 @@ function drawFauna(t) {
 /* medidas del encuadre: el panel tapa parte del lienzo, así que la isla
    se desplaza para quedar centrada en el hueco que de verdad se ve */
 const view = { w: 0, h: 0, wide: true, hidden: 0, sheetH: 0 };
-const ISLAND_SPAN = 236;   // la parcela mide 224; se le deja aire
+const ISLAND_SPAN = 208;   // la tierra emergida rara vez pasa de 200
 let userZoomed = false;
 
 /* Distancia mínima a la que la parcela entera entra en el hueco visible,
@@ -2139,11 +2157,17 @@ const RAIN_WORDS = [[0.10, 'sequía extrema'], [0.26, 'seco'], [0.42, 'templado 
                     [0.58, 'templado'], [0.74, 'húmedo'], [0.88, 'lluvioso'], [1.01, 'diluvio']];
 function rainWord(v) { for (const [k, w] of RAIN_WORDS) if (v < k) return w; return 'diluvio'; }
 
-let paintedRain = -1, repaintPending = false;
+/* Recolorear el terreno recorre decenas de miles de caras: arrastrar el
+   mando de lluvia no puede disparar uno por fotograma. */
+let paintedRain = -1, repaintTimer = 0;
 function maybeRepaint() {
-  if (Math.abs(world.rain - paintedRain) < 0.035 || repaintPending) return;
-  repaintPending = true;
-  requestAnimationFrame(() => { paintTerrain(world.rain); paintedRain = world.rain; repaintPending = false; });
+  if (Math.abs(world.rain - paintedRain) < 0.03 || repaintTimer) return;
+  repaintTimer = setTimeout(() => {
+    repaintTimer = 0;
+    paintTerrain(world.rain);
+    paintedRain = world.rain;
+    if (Math.abs(world.rain - paintedRain) >= 0.03) maybeRepaint();
+  }, 220);
 }
 
 function bindControls() {
@@ -2204,6 +2228,7 @@ function newWorld(seed) {
   world.rain = el.rain.value / 100;
   buildTerrainMesh();
   paintTerrain(world.rain);
+  shadeWater();
   paintedRain = world.rain;
   el.plot.textContent = (seed >>> 0).toString(16).toUpperCase().slice(-4).padStart(4, '0');
   el.rainV.textContent = rainWord(world.rain);
@@ -2268,7 +2293,7 @@ function tick(now) {
   }
 
   updateSky(world.t, world.rain);
-  if (frameN % 2 === 0) animateWater(world.t, world.rain);
+  if (frameN % 3 === 0) animateWater(world.t, world.rain);
   animateWeather(paused ? 0 : rdt * Math.min(speed, 3), world.rain);
   if (frameN % 3 === 0) drawPlants();
   drawFauna(world.t);
@@ -2277,7 +2302,7 @@ function tick(now) {
   frameN++;
 
   hudAcc += rdt;
-  if (hudAcc > 0.12) { hudAcc = 0; updateReadouts(); }
+  if (hudAcc > 0.05) { hudAcc = 0; updateReadouts(); }
 
   if (!booted) {
     booted = true;
@@ -2291,12 +2316,17 @@ buildWater();
 buildWeather();
 bindCamera();
 bindControls();
-newWorld((Math.random() * 0xfffffff) | 0);
-resize();
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 120));
-window.__biomaReady = true;
-requestAnimationFrame(tick);
+
+// Generar la parcela bloquea el hilo medio segundo. Dos fotogramas de
+// margen para que el aviso de carga llegue a verse en pantalla.
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  newWorld((Math.random() * 0xfffffff) | 0);
+  resize();
+  window.__biomaReady = true;
+  requestAnimationFrame(tick);
+}));
 </script>
 
 <script>
