@@ -1987,12 +1987,13 @@ function drawCharts() {
     ctxChart.beginPath(); ctxChart.moveTo(0, y); ctxChart.lineTo(w, y); ctxChart.stroke();
   }
 
-  if (hCount < 4) {
-    ctxChart.fillStyle = 'rgba(154,167,156,.55)';
-    ctxChart.font = '10px "IBM Plex Mono", monospace';
-    ctxChart.textAlign = 'center';
-    ctxChart.fillText('registrando…', w / 2, h / 2 + 3);
-    ctxChart.textAlign = 'left';
+  // Mientras la banda se llena, el trazo ocupa poco ancho. Decirlo es
+  // mejor que dejar un recuadro que parece roto.
+  if (hCount < HIST * 0.14) {
+    const x0 = (hCount / (HIST - 1)) * w;
+    ctxChart.fillStyle = 'rgba(127,140,130,.7)';
+    ctxChart.font = '10px "IBM Plex Mono", ui-monospace, monospace';
+    ctxChart.fillText('registrando…', Math.min(x0 + 10, w - 74), h / 2 + 3);
   }
 
   if (hCount > 1) {
@@ -2110,7 +2111,7 @@ function observe() {
 }
 
 /* ── reto ───────────────────────────────────────────────────────────── */
-const TRIAL_LEN = 300;
+const TRIAL_LEN = 300, TRIAL_TEXT = 'cinco minutos';   // van juntos
 let trial = { on: false, left: TRIAL_LEN, done: 0 };
 function setTrial(on) {
   trial.on = on; trial.left = TRIAL_LEN; trial.done = 0;
@@ -2119,9 +2120,9 @@ function setTrial(on) {
   el.trialBody.hidden = !on;
   el.trialClock.className = 'clock';
   el.trialNote.className = 'trial-note';
-  el.trialNote.textContent = 'Mantén vivas las tres especies durante cinco minutos.';
+  el.trialNote.textContent = 'Mantén vivas las tres especies durante ' + TRIAL_TEXT + '.';
   el.trialBar.style.width = '0%';
-  if (on) el.trialClock.textContent = '05:00';
+  if (on) el.trialClock.textContent = fmtClock(TRIAL_LEN);
 }
 function tickTrial(dt) {
   if (!trial.on || trial.done) return;
@@ -2140,8 +2141,8 @@ function tickTrial(dt) {
     trial.left = 0; trial.done = 1;
     el.trialClock.className = 'clock won';
     el.trialNote.className = 'trial-note good';
-    el.trialNote.textContent = 'Reto superado. El sistema se ha sostenido solo durante cinco minutos.';
-    note('win', 'Reto superado: cinco minutos con las tres especies vivas.', 'good', 1e9);
+    el.trialNote.textContent = 'Reto superado. El sistema se ha sostenido solo durante ' + TRIAL_TEXT + '.';
+    note('win', 'Reto superado: ' + TRIAL_TEXT + ' con las tres especies vivas.', 'good', 1e9);
   }
   el.trialClock.textContent = fmtClock(trial.left);
   el.trialClock.classList.toggle('warn', trial.left < 45 && !trial.done);
